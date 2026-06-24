@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>むしとりゲーム</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f4f8;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        #info-panel {
+            display: flex;
+            gap: 20px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #34495e;
+        }
+        #game-container {
+            position: relative;
+            width: 500px;
+            height: 500px;
+            background-color: #e8f5e9;
+            border: 4px solid #2e7d32;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        /* アミ（プレイヤー） */
+        #player {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border: 3px dashed #1565c0;
+            background-color: rgba(33, 150, 243, 0.3);
+            border-radius: 50%;
+            box-sizing: border-box;
+            transition: left 0.1s linear, top 0.1s linear;
+            z-index: 10;
+        }
+        /* 虫 */
+        .bug {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            background-color: #e65100;
+            border-radius: 50%;
+            z-index: 5;
+        }
+        /* 障害物 */
+        .obstacle {
+            position: absolute;
+            background-color: #78909c;
+            border: 2px solid #37474f;
+            border-radius: 4px;
+            z-index: 2;
+        }
+        /* 操作用ボタン */
+        #btn-catch {
+            margin-top: 15px;
+            padding: 12px 30px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: white;
+            background-color: #d84315;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            box-shadow: 0 4px #bf360c;
+        }
+        #btn-catch:active {
+            box-shadow: 0 0 #bf360c;
+            transform: translateY(4px);
+        }
+        /* ゲームオーバー画面 */
+        #game-over {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 2rem;
+            z-index: 20;
+        }
+        #btn-retry {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        .controls-hint {
+            margin-top: 10px;
+            font-size: 0.9rem;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>むしとりゲーム</h1>
+    
+    <div id="info-panel">
+        <div>残り時間: <span id="time">30</span> 秒</div>
+        <div>スコア: <span id="score">0</span> 点</div>
+    </div>
+
+    <div id="game-container">
+        <div id="player"></div>
+        <div id="game-over">
+            <div>GAME OVER</div>
+            <div id="final-score" style="font-size: 1.5rem; margin-top: 10px;"></div>
+            <button id="btn-retry" onclick="resetGame()">もう一度あそぶ</button>
+        </div>
+    </div>
+
+    <button id="btn-catch">キャッチ！ (Spaceキーでも可)</button>
+    <div class="controls-hint">操作方法: 矢印キー（↑↓←→）で移動 / キャッチボタンまたはスペースキーで虫を捕獲</div>
+
+<script>
+const container = document.getElementById('game-container');
+const player = document.getElementById('player');
+const timeDisplay = document.getElementById('time');
+const scoreDisplay = document.getElementById('score');
+const catchBtn = document.getElementById('btn-catch');
+const gameOverScreen = document.getElementById('game-over');
+const finalScoreDisplay = document.getElementById('final-score');
+
+// ゲーム設定
+const fieldSize = 500;
+const playerSize = 40;
+const bugSize = 16;
+const obstacleSize = 80; // 障害物の大きさ（80x80）
+const moveSpeed = 15; // プレイヤーの移動速度
+
+// ゲーム状態
+let playerX = 230;
+let playerY = 230;
+let score = 0;
+let timeLeft = 30;
+let gameInterval;
+let bugs = [];
+let obstacles = [];
+let isGameOver = false;
+
+// 初期化
+function initGame() {
+    isGameOver = false;
+    score = 0;
+    timeLeft = 30;
+    playerX = 230;
+    playerY = 230;
+    
+    scoreDisplay.textContent = score;
+    timeDisplay.textContent = timeLeft;
+    gameOverScreen.style.display = 'none';
+    
+    // 古い要素の削除
+    document.querySelectorAll('.bug').forEach(el => el.remove());
+    document.querySelectorAll('.obstacle').forEach(el => el.remove());
+    bugs = [];
+    obstacles = [];
+
+    // プレイヤー位置更新
+    updatePlayerPosition();
+
+    // 障害物を2つ生成
+    createObstacles();
+
+    // 虫を5匹生成
+    for (let i = 0; i < 5; i++) {
+        createBug();
+    }
+
+    // タイマースタート
+    clearInterval(gameInterval);
+    gameInterval = setInterval(() => {
+        timeLeft--;
+        timeDisplay.textContent = timeLeft;
+        if (timeLeft <= 0) {
+            endGame();
+        }
+    }, 1000);
+}
+
+// 障害物の生成（プレイヤーの初期位置に被らないようにする）
+function createObstacles() {
+    while (obstacles.length < 2) {
+        let x = Math.floor(Math.random() * (fieldSize - obstacleSize));
+        let y = Math.floor(Math.random() * (fieldSize - obstacleSize));
+
+        // プレイヤーの初期位置(230, 230)周辺には配置しない
+        let distToPlayer = Math.hypot((x + obstacleSize/2) - (playerX + playerSize/2), (y + obstacleSize/2) - (playerY + playerSize/2));
+        
+        if (distToPlayer > 100) {
+            const obsEl = document.createElement('div');
+            obsEl.className = 'obstacle';
+            obsEl.style.width = obstacleSize + 'px';
+            obsEl.style.height = obstacleSize + 'px';
+            obsEl.style.left = x + 'px';
+            obsEl.style.top = y + 'px';
+            container.appendChild(obsEl);
+            obstacles.push({ x, y, width: obstacleSize, height: obstacleSize });
+        }
+    }
+}
+
+// 虫の生成（障害物に重ならないようにする）
+function createBug() {
+    let x, y, isValid;
+    do {
+        isValid = true;
+        x = Math.floor(Math.random() * (fieldSize - bugSize));
+        y = Math.floor(Math.random() * (fieldSize - bugSize));
+
+        // 障害物との当たり判定チェック
+        for (let obs of obstacles) {
+            if (x < obs.x + obs.width &&
+                x + bugSize > obs.x &&
+                y < obs.y + obs.height &&
+                y + bugSize > obs.y) {
+                isValid = false;
+                break;
+            }
+        }
+    } while (!isValid);
+
+    const bugEl = document.createElement('div');
+    bugEl.className = 'bug';
+    bugEl.style.left = x + 'px';
+    bugEl.style.top = y + 'px';
+    container.appendChild(bugEl);
+    
+    bugs.push({ x, y, element: bugEl });
+}
+
+// プレイヤーの位置を更新
+function updatePlayerPosition() {
+    player.style.left = playerX + 'px';
+    player.style.top = playerY + 'px';
+}
+
+// 衝突判定（プレイヤーが障害物に入るかチェック）
+function checkObstacleCollision(nextX, nextY) {
+    for (let obs of obstacles) {
+        if (nextX < obs.x + obs.width &&
+            nextX + playerSize > obs.x &&
+            nextY < obs.y + obs.height &&
+            nextY + playerSize > obs.y) {
+            return true; // 衝突している
+        }
+    }
+    return false;
+}
+
+// プレイヤー移動処理
+function movePlayer(dx, dy) {
+    if (isGameOver) return;
+
+    let nextX = playerX + dx;
+    let nextY = playerY + dy;
+
+    // 画面外チェック
+    if (nextX < 0) nextX = 0;
+    if (nextX > fieldSize - playerSize) nextX = fieldSize - playerSize;
+    if (nextY < 0) nextY = 0;
+    if (nextY > fieldSize - playerSize) nextY = fieldSize - playerSize;
+
+    // 障害物チェックをして、ぶつからなければ移動
+    if (!checkObstacleCollision(nextX, nextY)) {
+        playerX = nextX;
+        playerY = nextY;
+        updatePlayerPosition();
+    }
+}
+
+// キャッチ処理
+function catchBugs() {
+    if (isGameOver) return;
+
+    let caughtCount = 0;
+    // アミの中心座標
+    let pCenterX = playerX + playerSize / 2;
+    let pCenterY = playerY + playerSize / 2;
+    let pRadius = playerSize / 2;
+
+    // 残す虫の配列
+    let remainingBugs = [];
+
+    for (let bug of bugs) {
+        // 虫の中心座標
+        let bCenterX = bug.x + bugSize / 2;
+        let bCenterY = bug.y + bugSize / 2;
+
+        // アミ（丸）と虫（丸）の距離を計算
+        let distance = Math.hypot(pCenterX - bCenterX, pCenterY - bCenterY);
+
+        // アミの半径に虫が収まっているか（簡易的にアミの範囲内か判定）
+        if (distance < pRadius) {
+            // キャッチ成功！
+            bug.element.remove();
+            score++;
+            timeLeft += 1; // 1秒増やす
+            caughtCount++;
+        } else {
+            remainingBugs.push(bug);
+        }
+    }
+
+    bugs = remainingBugs;
+    scoreDisplay.textContent = score;
+    timeDisplay.textContent = timeLeft;
+
+    // 捕まえた分だけ新しい虫を補充
+    for (let i = 0; i < caughtCount; i++) {
+        createBug();
+    }
+}
+
+// ゲーム終了
+function endGame() {
+    isGameOver = true;
+    clearInterval(gameInterval);
+    finalScoreDisplay.textContent = `結果: ${score} 匹つかまえた！`;
+    gameOverScreen.style.display = 'flex';
+}
+
+// リセット
+function resetGame() {
+    initGame();
+}
+
+// キーボード操作のイベントリスナー
+window.addEventListener('keydown', (e) => {
+    // 矢印キーでのスクロールを防止
+    if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].indexOf(e.code) > -1) {
+        e.preventDefault();
+    }
+
+    switch(e.code) {
+        case 'ArrowUp':
+            movePlayer(0, -moveSpeed);
+            break;
+        case 'ArrowDown':
+            movePlayer(0, moveSpeed);
+            break;
+        case 'ArrowLeft':
+            movePlayer(-moveSpeed, 0);
+            break;
+        case 'ArrowRight':
+            movePlayer(moveSpeed, 0);
+            break;
+        case 'Space':
+            catchBugs();
+            break;
+    }
+});
+
+// ボタンクリックのイベントリスナー
+catchBtn.addEventListener('click', catchBugs);
+
+// 初回スタート
+initGame();
+</script>
+
+</body>
+</html>
